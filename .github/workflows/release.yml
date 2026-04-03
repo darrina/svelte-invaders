@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app
+        run: npm run build
+
+      - name: Get version from package.json
+        id: package-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Create tag
+        id: create-tag
+        run: |
+          VERSION="${{ steps.package-version.outputs.version }}"
+          TAG="v${VERSION}"
+
+          # Check if tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, using timestamp suffix"
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            TAG="${TAG}-${TIMESTAMP}"
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create release package
+        run: |
+          cd dist
+          zip -r ../svelte-invaders-${{ steps.create-tag.outputs.tag }}.zip .
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.create-tag.outputs.tag }}
+          name: Release ${{ steps.create-tag.outputs.tag }}
+          body: |
+            ## Space Invaders Release ${{ steps.create-tag.outputs.tag }}
+
+            Built from commit ${{ github.sha }}
+
+            ### Installation
+            1. Download the `svelte-invaders-${{ steps.create-tag.outputs.tag }}.zip` file
+            2. Extract the contents
+            3. Serve the files with any static web server
+
+            ### Quick Start
+            ```bash
+            # Using Python
+            python -m http.server 8000
+
+            # Using Node.js http-server
+            npx http-server
+            ```
+
+            Then open your browser to the displayed URL.
+          files: |
+            svelte-invaders-${{ steps.create-tag.outputs.tag }}.zip
+          draft: false
+          prerelease: false
