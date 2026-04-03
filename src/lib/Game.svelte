@@ -119,6 +119,7 @@
 
   // Input
   const keys = {};
+  // Gesture thresholds in canvas pixels: small movement stays a tap, larger movement becomes a swipe.
   const TAP_MAX_DISTANCE = 18;
   const SWIPE_MOVE_THRESHOLD = 12;
   let touchPointerId = null;
