@@ -663,7 +663,7 @@
 
     // Continuous movement
     const alienSpeed = (1000 / alienMoveInterval) * (ALIEN_W + ALIEN_PAD_X) * 0.1;
-    const dx = alienDir * alienSpeed * dt * 1000 / 1000;
+    const dx = alienDir * alienSpeed * dt;
 
     let hitEdge = false;
     if (alienDir === 1 && maxX + dx > W - 20) hitEdge = true;
