@@ -2,8 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
 
   // ── Canvas dimensions ──────────────────────────────────────────────────────
-  const W = 800;
-  const H = 600;
+  const LANDSCAPE_SCENE = { width: 800, height: 600 };
+  const PORTRAIT_SCENE = { width: 600, height: 800 };
 
   // ── Game constants ─────────────────────────────────────────────────────────
   const COLS = 11;
@@ -12,11 +12,8 @@
   const ALIEN_H = 24;
   const ALIEN_PAD_X = 16;
   const ALIEN_PAD_Y = 16;
-  const ALIEN_START_X = 72;
-  const ALIEN_START_Y = 80;
   const PLAYER_W = 48;
   const PLAYER_H = 24;
-  const PLAYER_Y = H - 60;
   const BULLET_W = 3;
   const BULLET_H = 12;
   const PLAYER_SPEED = 280;   // px/s
@@ -28,7 +25,6 @@
   const UFO_INTERVAL_MIN = 15000; // ms
   const UFO_INTERVAL_MAX = 25000; // ms
   const SHIELD_COUNT = 4;
-  const SHIELD_Y = H - 120;
 
   // Alien point values per row
   const ALIEN_POINTS = [30, 20, 20, 10, 10];
@@ -109,6 +105,8 @@
   let ctx;
   let animId;
   let lastTime = 0;
+  let scene = { ...LANDSCAPE_SCENE };
+  let isPortraitLayout = false;
 
   // Game state: 'start' | 'playing' | 'paused' | 'gameover' | 'win'
   let gameState = 'start';
@@ -129,7 +127,7 @@
   let touchMoved = false;
 
   // Player
-  let player = { x: W / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
+  let player = { x: LANDSCAPE_SCENE.width / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
   let playerBullet = null; // { x, y }
   let playerShootCooldown = 0;
 
@@ -157,6 +155,133 @@
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
+  function getSceneWidth() {
+    return scene.width;
+  }
+
+  function getSceneHeight() {
+    return scene.height;
+  }
+
+  function getUIScale() {
+    return Math.min(getSceneWidth() / LANDSCAPE_SCENE.width, getSceneHeight() / LANDSCAPE_SCENE.height);
+  }
+
+  function scaleSceneX(value) {
+    return value * (getSceneWidth() / LANDSCAPE_SCENE.width);
+  }
+
+  function scaleSceneY(value) {
+    return value * (getSceneHeight() / LANDSCAPE_SCENE.height);
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function centerPlayerX(width = getSceneWidth()) {
+    return width / 2 - PLAYER_W / 2;
+  }
+
+  function getPlayerY(height = getSceneHeight(), portrait = isPortraitLayout) {
+    return height - (portrait ? 88 : 60);
+  }
+
+  function getShieldY(height = getSceneHeight(), portrait = isPortraitLayout) {
+    return height - (portrait ? 176 : 120);
+  }
+
+  function getAlienStartX(width = getSceneWidth()) {
+    const formationWidth = COLS * ALIEN_W + (COLS - 1) * ALIEN_PAD_X;
+    return Math.max(24, (width - formationWidth) / 2);
+  }
+
+  function getAlienStartY(portrait = isPortraitLayout) {
+    return portrait ? 120 : 80;
+  }
+
+  function getUfoY(portrait = isPortraitLayout) {
+    return portrait ? 72 : 50;
+  }
+
+  function shouldUsePortraitLayout() {
+    return window.innerWidth < 768 && window.innerHeight > window.innerWidth;
+  }
+
+  function rescaleHorizontalPosition(x, previousWidth, nextWidth, size = 0) {
+    const previousRange = Math.max(previousWidth - size, 1);
+    const nextRange = Math.max(nextWidth - size, 1);
+    return clamp((x / previousRange) * nextRange, 0, nextRange);
+  }
+
+  function syncSceneToViewport() {
+    const nextPortraitLayout = shouldUsePortraitLayout();
+    const nextScene = nextPortraitLayout ? PORTRAIT_SCENE : LANDSCAPE_SCENE;
+
+    if (
+      scene.width === nextScene.width &&
+      scene.height === nextScene.height &&
+      isPortraitLayout === nextPortraitLayout
+    ) {
+      return;
+    }
+
+    const previousWidth = scene.width;
+    const previousHeight = scene.height;
+    const previousShieldY = getShieldY(previousHeight, isPortraitLayout);
+    const nextShieldY = getShieldY(nextScene.height, nextPortraitLayout);
+    const previousUfoY = getUfoY(isPortraitLayout);
+    const nextUfoY = getUfoY(nextPortraitLayout);
+    const widthRatio = nextScene.width / previousWidth;
+    const heightRatio = nextScene.height / previousHeight;
+
+    scene = { ...nextScene };
+    isPortraitLayout = nextPortraitLayout;
+
+    player = {
+      ...player,
+      x: rescaleHorizontalPosition(player.x, previousWidth, nextScene.width, PLAYER_W),
+    };
+
+    if (playerBullet) {
+      playerBullet = {
+        x: playerBullet.x * widthRatio,
+        y: playerBullet.y * heightRatio,
+      };
+    }
+
+    alienBullets = alienBullets.map((bullet) => ({
+      x: bullet.x * widthRatio,
+      y: bullet.y * heightRatio,
+    }));
+
+    aliens = aliens.map((alien) => ({
+      ...alien,
+      x: alien.x * widthRatio,
+      y: alien.y * heightRatio,
+    }));
+
+    shields = shields.map((shield) => ({
+      ...shield,
+      x: shield.x * widthRatio,
+      y: nextShieldY + (shield.y - previousShieldY) * heightRatio,
+    }));
+
+    if (ufo) {
+      ufo = {
+        ...ufo,
+        x: ufo.x * widthRatio,
+        y: nextUfoY + (ufo.y - previousUfoY) * heightRatio,
+      };
+    }
+
+    explosions = explosions.map((explosion) => ({
+      ...explosion,
+      x: explosion.x * widthRatio,
+      y: explosion.y * heightRatio,
+    }));
+  }
+
   function alienTypeForRow(row) {
     if (row === 0) return 0;
     if (row <= 2) return 1;
@@ -170,8 +295,8 @@
         const type = alienTypeForRow(r);
         aliens.push({
           col: c, row: r,
-          x: ALIEN_START_X + c * (ALIEN_W + ALIEN_PAD_X),
-          y: ALIEN_START_Y + r * (ALIEN_H + ALIEN_PAD_Y),
+          x: getAlienStartX() + c * (ALIEN_W + ALIEN_PAD_X),
+          y: getAlienStartY() + r * (ALIEN_H + ALIEN_PAD_Y),
           alive: true,
           frame: 0,
           type,
@@ -197,7 +322,8 @@
     const shieldW = 56;
     const shieldH = 40;
     const pixelSize = 4;
-    const gap = (W - SHIELD_COUNT * shieldW) / (SHIELD_COUNT + 1);
+    const gap = (getSceneWidth() - SHIELD_COUNT * shieldW) / (SHIELD_COUNT + 1);
+    const shieldY = getShieldY();
 
     // Classic shield shape (14 cols × 10 rows with arch cutout)
     const shape = [
@@ -220,7 +346,7 @@
           if (shape[row][col]) {
             shields.push({
               x: sx + col * pixelSize,
-              y: SHIELD_Y + row * pixelSize,
+              y: shieldY + row * pixelSize,
               hp: 3,
               size: pixelSize,
             });
@@ -234,7 +360,7 @@
     score = 0;
     lives = 3;
     wave = 1;
-    player = { x: W / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
+    player = { x: centerPlayerX(), dead: false, respawnTimer: 0 };
     playerBullet = null;
     playerShootCooldown = 0;
     alienBullets = [];
@@ -256,7 +382,7 @@
 
   function startNextWave() {
     wave++;
-    player = { x: W / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
+    player = { x: centerPlayerX(), dead: false, respawnTimer: 0 };
     playerBullet = null;
     alienBullets = [];
     explosions = [];
@@ -269,7 +395,7 @@
 
     playerBullet = {
       x: player.x + PLAYER_W / 2,
-      y: PLAYER_Y - BULLET_H,
+      y: getPlayerY() - BULLET_H,
     };
     playerShootCooldown = 300;
     playSound('shoot');
@@ -307,8 +433,8 @@
 
   function getCanvasPoint(e) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
+    const scaleX = getSceneWidth() / rect.width;
+    const scaleY = getSceneHeight() / rect.height;
 
     return {
       x: (e.clientX - rect.left) * scaleX,
@@ -357,7 +483,7 @@
   function drawPlayer() {
     if (player.dead) return;
     const px = player.x;
-    const py = PLAYER_Y;
+    const py = getPlayerY();
 
     ctx.fillStyle = '#0f0';
     // Body
@@ -431,39 +557,42 @@
   }
 
   function drawHUD() {
-    // Score
-    drawPixelText('SCORE', 20, 24, 14, '#fff');
-    drawPixelText(String(score).padStart(4, '0'), 20, 44, 20, '#ff0');
+    const uiScale = getUIScale();
+    const labelSize = Math.max(12, Math.round(14 * uiScale));
+    const valueSize = Math.max(18, Math.round(20 * uiScale));
+    const scoreX = scaleSceneX(20);
+    const topLabelY = scaleSceneY(24);
+    const topValueY = scaleSceneY(44);
+    const centerX = getSceneWidth() / 2;
+    const rightX = getSceneWidth() - scaleSceneX(120);
 
-    // High score
-    drawPixelText('HI-SCORE', W / 2 - 60, 24, 14, '#fff');
-    drawPixelText(String(highScore).padStart(4, '0'), W / 2 - 40, 44, 20, '#ff0');
+    drawPixelText('SCORE', scoreX, topLabelY, labelSize, '#fff');
+    drawPixelText(String(score).padStart(4, '0'), scoreX, topValueY, valueSize, '#ff0');
+    drawPixelText('HI-SCORE', centerX - scaleSceneX(60), topLabelY, labelSize, '#fff');
+    drawPixelText(String(highScore).padStart(4, '0'), centerX - scaleSceneX(40), topValueY, valueSize, '#ff0');
+    drawPixelText(`WAVE ${wave}`, rightX, topLabelY, labelSize, '#fff');
+    drawPixelText('LIVES', rightX, topValueY, labelSize, '#fff');
 
-    // Wave
-    drawPixelText(`WAVE ${wave}`, W - 120, 24, 14, '#fff');
-
-    // Lives
-    drawPixelText('LIVES', W - 120, 44, 14, '#fff');
     for (let i = 0; i < lives; i++) {
-      // Mini player icon
       ctx.fillStyle = '#0f0';
-      ctx.fillRect(W - 110 + i * 28, 50, 20, 8);
-      ctx.fillRect(W - 114 + i * 28, 58, 28, 7);
+      const iconX = getSceneWidth() - scaleSceneX(110) + i * scaleSceneX(28);
+      const iconY = scaleSceneY(50);
+      ctx.fillRect(iconX, iconY, scaleSceneX(20), scaleSceneY(8));
+      ctx.fillRect(iconX - scaleSceneX(4), iconY + scaleSceneY(8), scaleSceneX(28), scaleSceneY(7));
     }
 
-    // Ground line
     ctx.strokeStyle = '#0f0';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(0, H - 36);
-    ctx.lineTo(W, H - 36);
+    ctx.moveTo(0, getSceneHeight() - 36);
+    ctx.lineTo(getSceneWidth(), getSceneHeight() - 36);
     ctx.stroke();
   }
 
   function drawScreen() {
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, getSceneWidth(), getSceneHeight());
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, getSceneWidth(), getSceneHeight());
 
     if (gameState === 'start') {
       drawStartScreen();
@@ -491,26 +620,30 @@
 
     if (gameState === 'paused') {
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(0, 0, W, H);
-      drawPixelText('PAUSED', W / 2 - 56, H / 2, 40, '#fff');
-      drawPixelText('PRESS P TO RESUME', W / 2 - 120, H / 2 + 50, 18, '#aaa');
+      ctx.fillRect(0, 0, getSceneWidth(), getSceneHeight());
+      drawPixelText('PAUSED', getSceneWidth() / 2 - scaleSceneX(56), getSceneHeight() / 2, Math.round(40 * getUIScale()), '#fff');
+      drawPixelText(
+        'PRESS P TO RESUME',
+        getSceneWidth() / 2 - scaleSceneX(120),
+        getSceneHeight() / 2 + scaleSceneY(50),
+        Math.round(18 * getUIScale()),
+        '#aaa'
+      );
     }
   }
 
   function drawStartScreen() {
-    // Title
     ctx.fillStyle = '#0f0';
-    ctx.font = 'bold 56px "Courier New", monospace';
+    ctx.font = `bold ${Math.round(56 * getUIScale())}px "Courier New", monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('SPACE INVADERS', W / 2, 120);
+    ctx.fillText('SPACE INVADERS', getSceneWidth() / 2, scaleSceneY(120));
 
-    // Draw sample aliens
-    const sampleY = [180, 240, 300];
+    const sampleY = [180, 240, 300].map(scaleSceneY);
     const sampleTypes = [0, 1, 2];
     const samplePoints = [30, 20, 10];
     for (let i = 0; i < 3; i++) {
       const fakeAlien = {
-        x: W / 2 - 18,
+        x: getSceneWidth() / 2 - 18,
         y: sampleY[i],
         frame: 0,
         type: sampleTypes[i],
@@ -518,74 +651,72 @@
       };
       drawAlien(fakeAlien);
       ctx.fillStyle = '#fff';
-      ctx.font = '20px "Courier New", monospace';
+      ctx.font = `${Math.round(20 * getUIScale())}px "Courier New", monospace`;
       ctx.textAlign = 'left';
-      ctx.fillText(`= ${samplePoints[i]} POINTS`, W / 2 + 30, sampleY[i] + 18);
+      ctx.fillText(`= ${samplePoints[i]} POINTS`, getSceneWidth() / 2 + scaleSceneX(30), sampleY[i] + scaleSceneY(18));
     }
 
-    // UFO
-    // Draw UFO demo sprite
     ctx.fillStyle = '#f0f';
-    ctx.fillRect(W / 2 - 20, 358, 40, 12);
-    ctx.fillRect(W / 2 - 28, 370, 56, 12);
-    ctx.fillRect(W / 2 - 32, 382, 64, 8);
+    ctx.fillRect(getSceneWidth() / 2 - scaleSceneX(20), scaleSceneY(358), scaleSceneX(40), scaleSceneY(12));
+    ctx.fillRect(getSceneWidth() / 2 - scaleSceneX(28), scaleSceneY(370), scaleSceneX(56), scaleSceneY(12));
+    ctx.fillRect(getSceneWidth() / 2 - scaleSceneX(32), scaleSceneY(382), scaleSceneX(64), scaleSceneY(8));
     ctx.fillStyle = '#fff';
-    ctx.font = '20px "Courier New", monospace';
+    ctx.font = `${Math.round(20 * getUIScale())}px "Courier New", monospace`;
     ctx.textAlign = 'left';
-    ctx.fillText('= ??? POINTS', W / 2 + 40, 375);
+    ctx.fillText('= ??? POINTS', getSceneWidth() / 2 + scaleSceneX(40), scaleSceneY(375));
 
     ctx.fillStyle = '#ff0';
-    ctx.font = 'bold 24px "Courier New", monospace';
+    ctx.font = `bold ${Math.round(24 * getUIScale())}px "Courier New", monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('PRESS ENTER OR TAP TO START', W / 2, 460);
+    ctx.fillText('PRESS ENTER OR TAP TO START', getSceneWidth() / 2, scaleSceneY(460));
 
     ctx.fillStyle = '#888';
-    ctx.font = '16px "Courier New", monospace';
-    ctx.fillText('← → MOVE    SPACE SHOOT    P PAUSE', W / 2, 510);
-    ctx.fillText('SWIPE TO MOVE    TAP TO SHOOT', W / 2, 536);
+    ctx.font = `${Math.round(16 * getUIScale())}px "Courier New", monospace`;
+    ctx.fillText('← → MOVE    SPACE SHOOT    P PAUSE', getSceneWidth() / 2, scaleSceneY(510));
+    ctx.fillText('SWIPE TO MOVE    TAP TO SHOOT', getSceneWidth() / 2, scaleSceneY(536));
 
     ctx.textAlign = 'left';
   }
 
   function drawGameOverScreen() {
     ctx.fillStyle = '#f00';
-    ctx.font = 'bold 56px "Courier New", monospace';
+    ctx.font = `bold ${Math.round(56 * getUIScale())}px "Courier New", monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('GAME OVER', W / 2, H / 2 - 60);
+    ctx.fillText('GAME OVER', getSceneWidth() / 2, getSceneHeight() / 2 - scaleSceneY(60));
 
     ctx.fillStyle = '#fff';
-    ctx.font = '28px "Courier New", monospace';
-    ctx.fillText(`SCORE: ${score}`, W / 2, H / 2);
+    ctx.font = `${Math.round(28 * getUIScale())}px "Courier New", monospace`;
+    ctx.fillText(`SCORE: ${score}`, getSceneWidth() / 2, getSceneHeight() / 2);
 
     if (score === highScore && score > 0) {
       ctx.fillStyle = '#ff0';
-      ctx.font = '22px "Courier New", monospace';
-      ctx.fillText('NEW HIGH SCORE!', W / 2, H / 2 + 44);
+      ctx.font = `${Math.round(22 * getUIScale())}px "Courier New", monospace`;
+      ctx.fillText('NEW HIGH SCORE!', getSceneWidth() / 2, getSceneHeight() / 2 + scaleSceneY(44));
     }
 
     ctx.fillStyle = '#aaa';
-    ctx.font = '20px "Courier New", monospace';
-    ctx.fillText('PRESS ENTER OR TAP TO PLAY AGAIN', W / 2, H / 2 + 100);
+    ctx.font = `${Math.round(20 * getUIScale())}px "Courier New", monospace`;
+    ctx.fillText('PRESS ENTER OR TAP TO PLAY AGAIN', getSceneWidth() / 2, getSceneHeight() / 2 + scaleSceneY(100));
     ctx.textAlign = 'left';
   }
 
   function drawWinScreen() {
     ctx.fillStyle = '#0ff';
-    ctx.font = 'bold 48px "Courier New", monospace';
+    ctx.font = `bold ${Math.round(48 * getUIScale())}px "Courier New", monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText('EARTH SAVED!', W / 2, H / 2 - 80);
+    ctx.fillText('EARTH SAVED!', getSceneWidth() / 2, getSceneHeight() / 2 - scaleSceneY(80));
 
     ctx.fillStyle = '#ff0';
-    ctx.font = '28px "Courier New", monospace';
-    ctx.fillText(`WAVE ${wave} CLEARED!`, W / 2, H / 2 - 20);
+    ctx.font = `${Math.round(28 * getUIScale())}px "Courier New", monospace`;
+    ctx.fillText(`WAVE ${wave} CLEARED!`, getSceneWidth() / 2, getSceneHeight() / 2 - scaleSceneY(20));
 
     ctx.fillStyle = '#fff';
-    ctx.font = '24px "Courier New", monospace';
-    ctx.fillText(`SCORE: ${score}`, W / 2, H / 2 + 30);
+    ctx.font = `${Math.round(24 * getUIScale())}px "Courier New", monospace`;
+    ctx.fillText(`SCORE: ${score}`, getSceneWidth() / 2, getSceneHeight() / 2 + scaleSceneY(30));
 
     ctx.fillStyle = '#0f0';
-    ctx.font = '20px "Courier New", monospace';
-    ctx.fillText('PRESS ENTER OR TAP FOR NEXT WAVE', W / 2, H / 2 + 90);
+    ctx.font = `${Math.round(20 * getUIScale())}px "Courier New", monospace`;
+    ctx.fillText('PRESS ENTER OR TAP FOR NEXT WAVE', getSceneWidth() / 2, getSceneHeight() / 2 + scaleSceneY(90));
     ctx.textAlign = 'left';
   }
 
@@ -608,7 +739,7 @@
       player.respawnTimer -= dt * 1000;
       if (player.respawnTimer <= 0) {
         player.dead = false;
-        player.x = W / 2 - PLAYER_W / 2;
+        player.x = centerPlayerX();
       }
       return;
     }
@@ -617,7 +748,7 @@
       player.x = Math.max(0, player.x - PLAYER_SPEED * dt);
     }
     if (keys['ArrowRight'] || keys['KeyD']) {
-      player.x = Math.min(W - PLAYER_W, player.x + PLAYER_SPEED * dt);
+      player.x = Math.min(getSceneWidth() - PLAYER_W, player.x + PLAYER_SPEED * dt);
     }
 
     playerShootCooldown -= dt * 1000;
@@ -668,7 +799,7 @@
     const dx = alienDir * alienSpeed * dt;
 
     let hitEdge = false;
-    if (alienDir === 1 && maxX + dx > W - 20) hitEdge = true;
+    if (alienDir === 1 && maxX + dx > getSceneWidth() - 20) hitEdge = true;
     if (alienDir === -1 && minX + dx < 20) hitEdge = true;
 
     if (hitEdge) {
@@ -719,7 +850,7 @@
     for (const b of alienBullets) {
       b.y += ALIEN_BULLET_SPEED * dt;
     }
-    alienBullets = alienBullets.filter(b => b.y < H);
+    alienBullets = alienBullets.filter(b => b.y < getSceneHeight());
   }
 
   function updateUFO(dt) {
@@ -729,8 +860,8 @@
       // Spawn UFO
       const dir = Math.random() > 0.5 ? 1 : -1;
       ufo = {
-        x: dir === 1 ? -64 : W + 4,
-        y: 50,
+        x: dir === 1 ? -64 : getSceneWidth() + 4,
+        y: getUfoY(),
         dir,
       };
       ufoTimer = getNextUfoInterval();
@@ -739,7 +870,7 @@
 
     if (ufo) {
       ufo.x += ufo.dir * UFO_SPEED * dt;
-      if (ufo.x > W + 70 || ufo.x < -70) {
+      if (ufo.x > getSceneWidth() + 70 || ufo.x < -70) {
         ufo = null;
       }
     }
@@ -819,14 +950,14 @@
         if (
           b.x >= player.x &&
           b.x <= player.x + PLAYER_W &&
-          b.y >= PLAYER_Y &&
-          b.y <= PLAYER_Y + PLAYER_H + 8
+          b.y >= getPlayerY() &&
+          b.y <= getPlayerY() + PLAYER_H + 8
         ) {
           alienBullets.splice(i, 1);
           lives--;
           player.dead = true;
           player.respawnTimer = 2000;
-          spawnExplosion(player.x + PLAYER_W / 2, PLAYER_Y + PLAYER_H / 2, '#0f0');
+          spawnExplosion(player.x + PLAYER_W / 2, getPlayerY() + PLAYER_H / 2, '#0f0');
           playSound('playerDead');
           break;
         }
@@ -856,7 +987,7 @@
 
     // Aliens reaching player level
     for (const a of aliens) {
-      if (a.alive && a.y + ALIEN_H >= PLAYER_Y - 10) {
+      if (a.alive && a.y + ALIEN_H >= getPlayerY() - 10) {
         lives = 0;
       }
     }
@@ -996,7 +1127,7 @@
     }
 
     if (gameState === 'playing' && touchMoved && !player.dead) {
-      player.x = Math.max(0, Math.min(W - PLAYER_W, point.x - PLAYER_W / 2));
+      player.x = Math.max(0, Math.min(getSceneWidth() - PLAYER_W, point.x - PLAYER_W / 2));
     }
   }
 
@@ -1023,9 +1154,11 @@
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   onMount(() => {
+    syncSceneToViewport();
     ctx = canvas.getContext('2d');
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('resize', syncSceneToViewport);
     lastTime = performance.now();
     animId = requestAnimationFrame(loop);
   });
@@ -1034,15 +1167,19 @@
     cancelAnimationFrame(animId);
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
+    window.removeEventListener('resize', syncSceneToViewport);
     if (audioCtx) audioCtx.close();
   });
 </script>
 
-<div class="game-shell">
+<div
+  class="game-shell"
+  style={`--scene-width: ${scene.width}; --scene-height: ${scene.height};`}
+>
   <canvas
     bind:this={canvas}
-    width={W}
-    height={H}
+    width={scene.width}
+    height={scene.height}
     on:pointerdown={handlePointerDown}
     on:pointermove={handlePointerMove}
     on:pointerup={handlePointerUp}
@@ -1063,23 +1200,23 @@
 <style>
   .game-shell {
     position: relative;
+    width: min(100vw, calc(100dvh * var(--scene-width) / var(--scene-height)));
+    height: min(100dvh, calc(100vw * var(--scene-height) / var(--scene-width)));
   }
 
   canvas {
     display: block;
+    width: 100%;
+    height: 100%;
     background: #000;
-    border: 2px solid #0f0;
-    box-shadow: 0 0 32px #0f08, 0 0 8px #0f04;
     image-rendering: pixelated;
-    max-width: 100vw;
-    max-height: 100vh;
     touch-action: none;
   }
 
   .touch-pause {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: max(12px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
     display: none;
     align-items: center;
     justify-content: center;

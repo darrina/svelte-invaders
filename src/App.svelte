@@ -18,11 +18,13 @@
     overflow: hidden;
   }
 
+  :global(html, body, #app) {
+    width: 100%;
+    height: 100%;
+  }
+
   main {
-    display: flex;
-    justify-content: center;
-    align-items: center;
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
   }
 </style>
