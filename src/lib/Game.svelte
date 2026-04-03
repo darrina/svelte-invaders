@@ -119,6 +119,12 @@
 
   // Input
   const keys = {};
+  const TAP_MAX_DISTANCE = 18;
+  const SWIPE_MOVE_THRESHOLD = 12;
+  let touchPointerId = null;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchMoved = false;
 
   // Player
   let player = { x: W / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
@@ -239,6 +245,73 @@
     explosions = [];
     initAliens();
     initShields();
+  }
+
+  function startGame() {
+    initGame();
+    gameState = 'playing';
+  }
+
+  function startNextWave() {
+    wave++;
+    player = { x: W / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
+    playerBullet = null;
+    alienBullets = [];
+    explosions = [];
+    initAliens();
+    gameState = 'playing';
+  }
+
+  function firePlayerBullet() {
+    if (gameState !== 'playing' || player.dead || playerBullet || playerShootCooldown > 0) return false;
+
+    playerBullet = {
+      x: player.x + PLAYER_W / 2,
+      y: PLAYER_Y - BULLET_H,
+    };
+    playerShootCooldown = 300;
+    playSound('shoot');
+    return true;
+  }
+
+  function handlePrimaryAction() {
+    if (gameState === 'start' || gameState === 'gameover') {
+      startGame();
+      return;
+    }
+
+    if (gameState === 'win') {
+      startNextWave();
+      return;
+    }
+
+    if (gameState === 'paused') {
+      gameState = 'playing';
+      return;
+    }
+
+    firePlayerBullet();
+  }
+
+  function togglePause() {
+    if (gameState === 'playing') gameState = 'paused';
+    else if (gameState === 'paused') gameState = 'playing';
+  }
+
+  function resetTouchState() {
+    touchPointerId = null;
+    touchMoved = false;
+  }
+
+  function getCanvasPoint(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
   }
 
   function getNextUfoInterval() {
@@ -462,11 +535,12 @@
     ctx.fillStyle = '#ff0';
     ctx.font = 'bold 24px "Courier New", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('PRESS ENTER TO START', W / 2, 460);
+    ctx.fillText('PRESS ENTER OR TAP TO START', W / 2, 460);
 
     ctx.fillStyle = '#888';
     ctx.font = '16px "Courier New", monospace';
     ctx.fillText('← → MOVE    SPACE SHOOT    P PAUSE', W / 2, 510);
+    ctx.fillText('SWIPE TO MOVE    TAP TO SHOOT', W / 2, 536);
 
     ctx.textAlign = 'left';
   }
@@ -489,7 +563,7 @@
 
     ctx.fillStyle = '#aaa';
     ctx.font = '20px "Courier New", monospace';
-    ctx.fillText('PRESS ENTER TO PLAY AGAIN', W / 2, H / 2 + 100);
+    ctx.fillText('PRESS ENTER OR TAP TO PLAY AGAIN', W / 2, H / 2 + 100);
     ctx.textAlign = 'left';
   }
 
@@ -509,7 +583,7 @@
 
     ctx.fillStyle = '#0f0';
     ctx.font = '20px "Courier New", monospace';
-    ctx.fillText('PRESS ENTER FOR NEXT WAVE', W / 2, H / 2 + 90);
+    ctx.fillText('PRESS ENTER OR TAP FOR NEXT WAVE', W / 2, H / 2 + 90);
     ctx.textAlign = 'left';
   }
 
@@ -545,13 +619,8 @@
     }
 
     playerShootCooldown -= dt * 1000;
-    if ((keys['Space'] || keys['ArrowUp']) && !playerBullet && playerShootCooldown <= 0) {
-      playerBullet = {
-        x: player.x + PLAYER_W / 2,
-        y: PLAYER_Y - BULLET_H,
-      };
-      playerShootCooldown = 300;
-      playSound('shoot');
+    if (keys['Space'] || keys['ArrowUp']) {
+      firePlayerBullet();
     }
   }
 
@@ -888,30 +957,65 @@
     if (e.code === 'Space') e.preventDefault();
 
     if (e.code === 'KeyP' || e.code === 'Escape') {
-      if (gameState === 'playing') gameState = 'paused';
-      else if (gameState === 'paused') gameState = 'playing';
+      togglePause();
     }
 
     if (e.code === 'Enter') {
-      if (gameState === 'start' || gameState === 'gameover') {
-        initGame();
-        gameState = 'playing';
-      } else if (gameState === 'win') {
-        wave++;
-        // Start next wave
-        player = { x: W / 2 - PLAYER_W / 2, dead: false, respawnTimer: 0 };
-        playerBullet = null;
-        alienBullets = [];
-        explosions = [];
-        initAliens();
-        // Keep shields but reduce them slightly
-        gameState = 'playing';
-      }
+      handlePrimaryAction();
     }
   }
 
   function handleKeyUp(e) {
     keys[e.code] = false;
+  }
+
+  function handlePointerDown(e) {
+    if (e.pointerType !== 'touch' || touchPointerId !== null) return;
+
+    e.preventDefault();
+    touchPointerId = e.pointerId;
+
+    const point = getCanvasPoint(e);
+    touchStartX = point.x;
+    touchStartY = point.y;
+    touchMoved = false;
+  }
+
+  function handlePointerMove(e) {
+    if (e.pointerType !== 'touch' || e.pointerId !== touchPointerId) return;
+
+    e.preventDefault();
+    const point = getCanvasPoint(e);
+
+    const deltaX = point.x - touchStartX;
+    const deltaY = point.y - touchStartY;
+    if (Math.abs(deltaX) > SWIPE_MOVE_THRESHOLD || Math.abs(deltaY) > TAP_MAX_DISTANCE) {
+      touchMoved = true;
+    }
+
+    if (gameState === 'playing' && touchMoved && !player.dead) {
+      player.x = Math.max(0, Math.min(W - PLAYER_W, point.x - PLAYER_W / 2));
+    }
+  }
+
+  function handlePointerUp(e) {
+    if (e.pointerType !== 'touch' || e.pointerId !== touchPointerId) return;
+
+    e.preventDefault();
+    const point = getCanvasPoint(e);
+    const distance = Math.hypot(point.x - touchStartX, point.y - touchStartY);
+    if (!touchMoved && distance <= TAP_MAX_DISTANCE) {
+      handlePrimaryAction();
+    }
+
+    resetTouchState();
+  }
+
+  function handlePointerCancel(e) {
+    if (e.pointerType !== 'touch' || e.pointerId !== touchPointerId) return;
+
+    e.preventDefault();
+    resetTouchState();
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -932,9 +1036,33 @@
   });
 </script>
 
-<canvas bind:this={canvas} width={W} height={H}></canvas>
+<div class="game-shell">
+  <canvas
+    bind:this={canvas}
+    width={W}
+    height={H}
+    on:pointerdown={handlePointerDown}
+    on:pointermove={handlePointerMove}
+    on:pointerup={handlePointerUp}
+    on:pointercancel={handlePointerCancel}
+  ></canvas>
+
+  <button
+    class="touch-pause"
+    type="button"
+    on:click={togglePause}
+    disabled={gameState !== 'playing' && gameState !== 'paused'}
+    aria-label={gameState === 'paused' ? 'Resume game' : 'Pause game'}
+  >
+    {gameState === 'paused' ? '▶' : 'Ⅱ'}
+  </button>
+</div>
 
 <style>
+  .game-shell {
+    position: relative;
+  }
+
   canvas {
     display: block;
     background: #000;
@@ -943,5 +1071,33 @@
     image-rendering: pixelated;
     max-width: 100vw;
     max-height: 100vh;
+    touch-action: none;
+  }
+
+  .touch-pause {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid #0f0;
+    border-radius: 999px;
+    background: rgb(0 0 0 / 75%);
+    color: #0f0;
+    font: inherit;
+    font-size: 18px;
+  }
+
+  .touch-pause:disabled {
+    opacity: 0.35;
+  }
+
+  @media (pointer: coarse) {
+    .touch-pause {
+      display: inline-flex;
+    }
   }
 </style>
