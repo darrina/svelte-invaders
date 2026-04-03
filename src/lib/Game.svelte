@@ -211,7 +211,7 @@
   function rescaleHorizontalPosition(x, previousWidth, nextWidth, size = 0) {
     const previousRange = Math.max(previousWidth - size, 1);
     const nextRange = Math.max(nextWidth - size, 1);
-    return clamp((x / previousRange) * nextRange, 0, nextRange);
+    return clamp((x / previousRange) * nextRange, 0, nextWidth - size);
   }
 
   function syncSceneToViewport() {
