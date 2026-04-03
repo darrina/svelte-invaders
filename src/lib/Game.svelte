@@ -122,6 +122,7 @@
   // Gesture thresholds in canvas pixels: small movement stays a tap, larger movement becomes a swipe.
   const TAP_MAX_DISTANCE = 18;
   const SWIPE_MOVE_THRESHOLD = 12;
+  const SWIPE_VERTICAL_THRESHOLD = 18;
   let touchPointerId = null;
   let touchStartX = 0;
   let touchStartY = 0;
@@ -990,7 +991,7 @@
 
     const deltaX = point.x - touchStartX;
     const deltaY = point.y - touchStartY;
-    if (Math.abs(deltaX) > SWIPE_MOVE_THRESHOLD || Math.abs(deltaY) > TAP_MAX_DISTANCE) {
+    if (Math.abs(deltaX) > SWIPE_MOVE_THRESHOLD || Math.abs(deltaY) > SWIPE_VERTICAL_THRESHOLD) {
       touchMoved = true;
     }
 
