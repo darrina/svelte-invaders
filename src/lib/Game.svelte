@@ -3,7 +3,7 @@
 
   // ── Canvas dimensions ──────────────────────────────────────────────────────
   const LANDSCAPE_SCENE = { width: 800, height: 600 };
-  const PORTRAIT_SCENE = { width: 600, height: 800 };
+  const PORTRAIT_SCENE = { width: 600, height: 960 };
 
   // ── Game constants ─────────────────────────────────────────────────────────
   const COLS = 11;
